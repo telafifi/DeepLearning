@@ -208,7 +208,7 @@ class PyTorchBasics:
 
         # x.cumsum(0) returns the cumulative sum of the elements along the 0th dimension
         # x.cumsum(1) returns the cumulative sum of the elements along the 1st dimension
-        #  giving a running total for each row.
+        # giving a running total for each row.
         return x.cumsum(0).cumsum(1)
 
     @staticmethod
