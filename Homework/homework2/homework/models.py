@@ -25,7 +25,7 @@ class ClassificationLoss(nn.Module):
         Returns:
             tensor, scalar loss
         """
-        raise NotImplementedError("ClassificationLoss.forward() is not implemented")
+        return -torch.nn.functional.log_softmax(logits, dim=1)[range(logits.shape[0]), target].mean()
 
 
 class LinearClassifier(nn.Module):
@@ -43,7 +43,7 @@ class LinearClassifier(nn.Module):
         """
         super().__init__()
 
-        raise NotImplementedError("LinearClassifier.__init__() is not implemented")
+        self.model = nn.Linear(h * w * 3, num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -53,7 +53,9 @@ class LinearClassifier(nn.Module):
         Returns:
             tensor (b, num_classes) logits
         """
-        raise NotImplementedError("LinearClassifier.forward() is not implemented")
+        # Reshape the input tensor from (batch_size, 3, H, W) to (batch_size, H * W * 3)
+        flattened = x.view(x.size(0), -1)  # Flatten the input
+        return self.model(flattened)
 
 
 class MLPClassifier(nn.Module):

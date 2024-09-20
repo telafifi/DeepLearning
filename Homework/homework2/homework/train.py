@@ -19,10 +19,17 @@ def train(
     seed: int = 2024,
     **kwargs,
 ):
+    # if torch.cuda.is_available():
+    #     device = torch.device("cuda")
+    # else:
+    #     print("CUDA not available, using CPU")
+    #     device = torch.device("cpu")
     if torch.cuda.is_available():
         device = torch.device("cuda")
+    elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
+        device = torch.device("mps") # for Arm Macs
     else:
-        print("CUDA not available, using CPU")
+        print("GPU not available, using CPU")
         device = torch.device("cpu")
 
     # set random seed so each run is deterministic
