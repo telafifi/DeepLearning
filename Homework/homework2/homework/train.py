@@ -13,7 +13,7 @@ from .utils import load_data
 def train(
     exp_dir: str = "logs",
     model_name: str = "linear",
-    num_epoch: int = 50,
+    num_epoch: int = 60,
     lr: float = 1e-3,
     batch_size: int = 128,
     seed: int = 2024,
@@ -50,7 +50,7 @@ def train(
 
     # create loss function and optimizer
     loss_func = ClassificationLoss()
-    # optimizer = ...
+    optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
 
     global_step = 0
     metrics = {"train_acc": [], "val_acc": []}
@@ -66,8 +66,15 @@ def train(
         for img, label in train_data:
             img, label = img.to(device), label.to(device)
 
-            # TODO: implement training step
-            raise NotImplementedError("Training step not implemented")
+            preds = model(img)
+            loss = loss_func(preds, label)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            acc = (preds.argmax(dim=1) == label).float().mean().item()
+            metrics["train_acc"].append(acc)
 
             global_step += 1
 
@@ -78,14 +85,16 @@ def train(
             for img, label in val_data:
                 img, label = img.to(device), label.to(device)
 
-                # TODO: compute validation accuracy
-                raise NotImplementedError("Validation accuracy not implemented")
+                preds = model(img)
+                acc = (preds.argmax(dim=1) == label).float().mean().item()
+                metrics["val_acc"].append(acc)
 
         # log average train and val accuracy to tensorboard
         epoch_train_acc = torch.as_tensor(metrics["train_acc"]).mean()
         epoch_val_acc = torch.as_tensor(metrics["val_acc"]).mean()
 
-        raise NotImplementedError("Logging not implemented")
+        logger.add_scalar("Train/Accuracy", epoch_train_acc, epoch)
+        logger.add_scalar("Val/Accuracy", epoch_val_acc, epoch)
 
         # print on first, last, every 10th epoch
         if epoch == 0 or epoch == num_epoch - 1 or (epoch + 1) % 10 == 0:
@@ -108,12 +117,12 @@ if __name__ == "__main__":
 
     parser.add_argument("--exp_dir", type=str, default="logs")
     parser.add_argument("--model_name", type=str, required=True)
-    parser.add_argument("--num_epoch", type=int, default=50)
+    parser.add_argument("--num_epoch", type=int, default=60)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=2024)
 
     # optional: additional model hyperparamters
-    # parser.add_argument("--num_layers", type=int, default=3)
+    # parser.add_argument("--num_layers", type=int, default=4)
 
     # pass all arguments to train
     train(**vars(parser.parse_args()))
