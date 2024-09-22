@@ -15,8 +15,7 @@ import torch.nn as nn
 class ClassificationLoss(nn.Module):
     def forward(self, logits: torch.Tensor, target: torch.LongTensor) -> torch.Tensor:
         """
-        Multi-class classification loss
-        Hint: simple one-liner
+        Multi-class classification loss function
 
         Args:
             logits: tensor (b, c) logits, where c is the number of classes
@@ -40,10 +39,14 @@ class LinearClassifier(nn.Module):
             h: int, height of the input image
             w: int, width of the input image
             num_classes: int, number of classes
+            
+        Define a simple linear model for image classification
+        convert the input image to a 1D tensor and pass it through a linear layer
         """
         super().__init__()
-
-        self.model = nn.Linear(h * w * 3, num_classes)
+        
+        input_size = h * w * 3
+        self.model = nn.Linear(input_size, num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -55,6 +58,8 @@ class LinearClassifier(nn.Module):
         """
         # Reshape the input tensor from (batch_size, 3, H, W) to (batch_size, H * W * 3)
         flattened = x.view(x.size(0), -1)  # Flatten the input
+        
+        # Run the model
         return self.model(flattened)
 
 
@@ -66,7 +71,9 @@ class MLPClassifier(nn.Module):
         num_classes: int = 6,
     ):
         """
-        An MLP with a single hidden layer
+        An MLP (Multi-layer perceptron) with a single hidden layer.
+        This will incorporate a single hidden layer between the input and output layers
+        adding a non-linear transformation to the model.
 
         Args:
             h: int, height of the input image
@@ -78,7 +85,9 @@ class MLPClassifier(nn.Module):
         input_size = h * w * 3
         hidden_dim = 128
         
-        # List the layers in the network
+        # List the layers in the network to convert the input size
+        # to the hidden layer size and then to the output size
+        # The ReLU activation function is used to introduce non-linearity
         layers = []
         layers.append(nn.Linear(input_size, hidden_dim))
         layers.append(nn.ReLU())
@@ -100,6 +109,11 @@ class MLPClassifier(nn.Module):
 
 class MLPClassifierDeep(nn.Module):
     class Block(nn.Module):
+        """
+        A simple block that includes a linear layer, layer normalization, and ReLU activation function.
+        This acts as a building block for the deep MLP model by acting as a single hidden layer
+        with the deep network having multiple hidden layers.
+        """
         def __init__(self, in_channels: int, out_channels: int):
             super().__init__()
             self.model = nn.Sequential(
@@ -134,15 +148,19 @@ class MLPClassifierDeep(nn.Module):
         layers = []
         hidden_dim = 128
 
-        # First layer (input to first hidden layer)
+        # First layer (input to first hidden layer), perform a simple linear transformation
+        # followed by a ReLU activation function
         layers.append(nn.Linear(input_size, hidden_dim))
         layers.append(nn.ReLU())
 
-        # Add num_layers hidden layers
+        # Once the initial transformation is done, add in hidden layers
+        # that include a linear transformation, layer normalization, and ReLU activation function
+        # via the block transformation
         for _ in range(num_layers - 1):
             layers.append(self.Block(hidden_dim, hidden_dim))
 
-        # Output layer
+        # Output layer - finally convert the hidden layer to the output layer
+        # via a linear transformation
         layers.append(nn.Linear(hidden_dim, num_classes))
 
         # Sequential model
@@ -162,6 +180,12 @@ class MLPClassifierDeep(nn.Module):
 
 class MLPClassifierDeepResidual(nn.Module):
     class Block(nn.Module):
+        """
+        A simple block that includes a linear layer, layer normalization, and ReLU activation function.
+        This block includes a skip connection to allow for residual learning.
+        This acts as a building block for the deep MLP model by acting as a single hidden layer
+        with the deep network having multiple hidden layers.
+        """
         def __init__(self, in_channels: int, out_channels: int):
             super().__init__()
             self.model = nn.Sequential(
@@ -190,12 +214,12 @@ class MLPClassifierDeepResidual(nn.Module):
         num_layers: int = 4,  # Number of hidden layers
     ):
         """
+        An MLP with multiple hidden layers using residual connections.
+        
         Args:
             h: int, height of image
             w: int, width of image
             num_classes: int
-
-        Hint - you can add more arguments to the constructor such as:
             hidden_dim: int, size of hidden layers
             num_layers: int, number of hidden layers
         """
@@ -206,14 +230,17 @@ class MLPClassifierDeepResidual(nn.Module):
         layers = []
         hidden_dim = 128
 
-        # First layer (input to first hidden layer)
+        # First layer (input to first hidden layer), perform a simple linear transformation
         layers.append(nn.Linear(input_size, hidden_dim))
 
-        # Add num_layers hidden layers
+        # Once the initial transformation is done, add in hidden layers
+        # that include a linear transformation, layer normalization, and ReLU activation function
+        # via the block transformation with a skip connection
         for _ in range(num_layers - 1):
             layers.append(self.Block(hidden_dim, hidden_dim))
 
-        # Output layer
+        # Output layer - finally convert the hidden layer to the output layer
+        # via a linear transformation
         layers.append(nn.Linear(hidden_dim, num_classes))
 
         # Sequential model
