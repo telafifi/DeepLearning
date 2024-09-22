@@ -19,11 +19,6 @@ def train(
     seed: int = 2024,
     **kwargs,
 ):
-    # if torch.cuda.is_available():
-    #     device = torch.device("cuda")
-    # else:
-    #     print("CUDA not available, using CPU")
-    #     device = torch.device("cpu")
     if torch.cuda.is_available():
         device = torch.device("cuda")
     elif torch.backends.mps.is_available() and torch.backends.mps.is_built():
@@ -40,15 +35,16 @@ def train(
     log_dir = Path(exp_dir) / f"{model_name}_{datetime.now().strftime('%m%d_%H%M%S')}"
     logger = tb.SummaryWriter(log_dir)
 
-    # note: the grader uses default kwargs, you'll have to bake them in for the final submission
+    # Load in a model and move it to the device to utilize GPU
     model = load_model(model_name, **kwargs)
     model = model.to(device)
     model.train()
 
+    # Load in training and validation data
     train_data = load_data("classification_data/train", shuffle=True, batch_size=batch_size, num_workers=2)
     val_data = load_data("classification_data/val", shuffle=False)
 
-    # create loss function and optimizer
+    # Create loss function and optimizer
     loss_func = ClassificationLoss()
     optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
 
@@ -63,16 +59,24 @@ def train(
 
         model.train()
 
+        # Iterate through each element in the training data
         for img, label in train_data:
+            # Load the image and label to the device
             img, label = img.to(device), label.to(device)
 
+            # Forward pass through the model and calculate the loss
             preds = model(img)
             loss = loss_func(preds, label)
 
+            # Backward pass to calculate the gradients
             optimizer.zero_grad()
             loss.backward()
+            
+            # Update the model weights using the optimizer
             optimizer.step()
 
+            # Calculate the accuracy and append to the metrics
+            # This is done to calculate the average accuracy at the end of the epoch
             acc = (preds.argmax(dim=1) == label).float().mean().item()
             metrics["train_acc"].append(acc)
 
@@ -83,8 +87,12 @@ def train(
             model.eval()
 
             for img, label in val_data:
+                # Load the image and label to the device
                 img, label = img.to(device), label.to(device)
 
+                # Forward pass through the model and calculate the accuracy
+                # No need to calculate the loss since we are only interested in the accuracy
+                # as this is the validation set
                 preds = model(img)
                 acc = (preds.argmax(dim=1) == label).float().mean().item()
                 metrics["val_acc"].append(acc)
@@ -104,7 +112,7 @@ def train(
                 f"val_acc={epoch_val_acc:.4f}"
             )
 
-    # save and overwrite the model in the root directory for grading
+    # save and overwrite the model in the root directory with the final model
     save_model(model)
 
     # save a copy of model weights in the log directory
