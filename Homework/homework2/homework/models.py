@@ -57,6 +57,7 @@ class LinearClassifier(nn.Module):
             tensor (b, num_classes) logits
         """
         # Reshape the input tensor from (batch_size, 3, H, W) to (batch_size, H * W * 3)
+        # this flattens the image into a long vector that can be used in a linear layer
         flattened = x.view(x.size(0), -1)  # Flatten the input
         
         # Run the model
