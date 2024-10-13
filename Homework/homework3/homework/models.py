@@ -2,6 +2,7 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 HOMEWORK_DIR = Path(__file__).resolve().parent
 INPUT_MEAN = [0.2788, 0.2657, 0.2629]
@@ -9,6 +10,39 @@ INPUT_STD = [0.2064, 0.1944, 0.2252]
 
 
 class Classifier(nn.Module):
+    class Block(nn.Module):
+        def __init__(self, in_channels, out_channels, kernel_size=3, stride=1):
+            super().__init__()
+            padding = (kernel_size - 1) // 2
+            
+            self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
+            self.bn = nn.BatchNorm2d(out_channels)
+            self.relu = nn.ReLU()
+            self.pool = nn.MaxPool2d(2, 2)
+            
+            self.model = nn.Sequential(
+                self.conv,
+                self.bn,
+                self.relu,
+            )
+            
+            # Skip connection to allow for residual learning
+            # If the input and output dimensions are different, use a linear layer to match the dimensions
+            # Otherwise, use an identity function
+            if in_channels != out_channels:
+                self.skip = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, padding=0)
+            else:
+                self.skip = nn.Identity()
+
+        def forward(self, x):
+            # Only apply pooling if spatial dimensions are large enough
+            x = self.skip(x) + self.model(x)
+            
+            if x.size(2) > 1 and x.size(3) > 1:  # Check spatial size
+                x = self.pool(x)
+                
+            return x
+
     def __init__(
         self,
         in_channels: int = 3,
@@ -25,9 +59,28 @@ class Classifier(nn.Module):
 
         self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN))
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
-
-        # TODO: implement
-        pass
+        
+        n_blocks = 4
+        cnn_layers = [
+            torch.nn.Conv2d(3, in_channels, kernel_size=11, stride=2, padding=5),
+            torch.nn.ReLU(),
+        ]
+        
+        c1 = in_channels
+        for _ in range(n_blocks):
+            c2 = c1 * 2
+            cnn_layers.append(self.Block(c1, c2, kernel_size=3, stride=2))
+            c1 = c2
+        # cnn_layers.append(torch.nn.Conv2d(c1, 1, kernel_size=1))
+        cnn_layers.append(torch.nn.AdaptiveAvgPool2d(1))
+        self.network = torch.nn.Sequential(*cnn_layers)
+        
+        # Fully connected layers
+        self.fc1 = nn.Linear(c1, 256)  # After 3 poolings, (64 / 2^3) = 8
+        self.fc2 = nn.Linear(256, num_classes)
+        
+        # Regularization
+        self.dropout = nn.Dropout(0.5)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -37,11 +90,19 @@ class Classifier(nn.Module):
         Returns:
             tensor (b, num_classes) logits
         """
-        # optional: normalizes the input
+        # Normalize the input
         z = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
-
-        # TODO: replace with actual forward pass
-        logits = torch.randn(x.size(0), 6)
+        
+        z = self.network(z)
+        
+        # Flatten the tensor for fully connected layers
+        z = z.view(z.size(0), -1)  # Flatten -> (B, 128 * 8 * 8)
+        
+        # Fully connected layers with dropout
+        z = F.relu(self.fc1(z))  # -> (B, 256)
+        z = self.dropout(z)
+        
+        logits = self.fc2(z)  # -> (B, num_classes)
 
         return logits
 

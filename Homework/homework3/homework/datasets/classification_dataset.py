@@ -38,7 +38,8 @@ class SuperTuxDataset(Dataset):
             # TODO: construct your custom augmentation
             xform = transforms.Compose(
                 [
-                    transforms.ToTensor(),
+                    # transforms.RandomHorizontalFlip(),  # Randomly flip images horizontally
+                    transforms.ToTensor(),              # Convert images to tensor
                 ]
             )
 
@@ -93,5 +94,6 @@ def load_data(
         num_workers=num_workers,
         batch_size=batch_size,
         shuffle=shuffle,
+        persistent_workers=True,
         drop_last=True,
     )
