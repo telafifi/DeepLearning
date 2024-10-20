@@ -18,7 +18,7 @@ def train(
     lr: float = 1e-3,
     batch_size: int = 128,
     seed: int = 2024,
-    num_classes: int = 6,
+    num_classes: int = 3,
     **kwargs,
 ):
     if torch.cuda.is_available():
@@ -48,12 +48,12 @@ def train(
 
     # Loss functions and optimizer
     seg_loss_func = nn.CrossEntropyLoss()
-    depth_loss_func = nn.MSELoss()
+    depth_loss_func = nn.L1Loss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     # Initialize metrics
-    train_metric = DetectionMetric()
-    val_metric = DetectionMetric()
+    train_metric = DetectionMetric(num_classes=num_classes)
+    val_metric = DetectionMetric(num_classes=num_classes)
 
     # Training loop
     for epoch in range(num_epoch):
@@ -76,11 +76,12 @@ def train(
             # Compute losses
             seg_loss = seg_loss_func(logits, labels)
             depth_loss = depth_loss_func(raw_depth, depth_gt)
-            loss = 0.5 * seg_loss + depth_loss
+            loss = seg_loss + depth_loss
 
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            
             total_loss += loss.item()
         
         total_loss /= len(train_data)
@@ -128,9 +129,9 @@ if __name__ == "__main__":
 
     parser.add_argument("--exp_dir", type=str, default="logs")
     parser.add_argument("--model_name", type=str, required=True)
-    parser.add_argument("--num_epoch", type=int, default=50)
+    parser.add_argument("--num_epoch", type=int, default=60)
     parser.add_argument("--num_classes", type=int, default=3)
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--seed", type=int, default=2024)
 
     train(**vars(parser.parse_args()))
