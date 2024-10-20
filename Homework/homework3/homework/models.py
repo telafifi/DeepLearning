@@ -164,8 +164,15 @@ class Detector(torch.nn.Module):
         self.down2 = ConvBlock(16, 32, stride=2)  # (B, 32, 24, 32)
         
         # Decoder: Up-sampling layers
-        self.up1 = UpConvBlock(32, 16)  # (B, 16, 48, 64)
-        self.up2 = UpConvBlock(16, 16)  # (B, 16, 96, 128)
+        self.seg_up1 = UpConvBlock(32, 16)  # (B, 16, 48, 64)
+        self.seg_skip1 = ConvBlock(32, 16)  # Combine up1 and down1
+        self.seg_up2 = UpConvBlock(16, 16)  # (B, 16, 96, 128)
+        
+        
+        # Decoder: Up-sampling layers
+        self.depth_up1 = UpConvBlock(32, 16)  # (B, 16, 48, 64)
+        self.depth_skip1 = ConvBlock(32, 16)  # Combine up1 and down1
+        self.depth_up2 = UpConvBlock(16, 16)  # (B, 16, 96, 128)
 
         # Segmentation Head: Predict 3 class logits
         
@@ -178,6 +185,8 @@ class Detector(torch.nn.Module):
         # Initialize segmentation head
         nn.init.xavier_uniform_(self.seg_head.weight)
         nn.init.constant_(self.seg_head.bias, 0)
+        nn.init.xavier_uniform_(self.depth_head.weight)
+        nn.init.constant_(self.depth_head.bias, 0)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -205,23 +214,31 @@ class Detector(torch.nn.Module):
 
         
         # Decoder
-        u1 = self.up1(d2)  # (B, 16, 48, 64)
+        seg_u1 = self.seg_up1(d2)  # (B, 16, 48, 64)
         # print(f"After up1 - shape: {u1.shape}, min: {u1.min().item():.4f}, max: {u1.max().item():.4f}, mean: {u1.mean().item():.4f}")
-
-        u2 = self.up2(u1 + d1)  # (B, 16, 96, 128) - Skip connection
-        # print(f"After up2 (with skip connection) - shape: {u2.shape}, min: {u2.min().item():.4f}, max: {u2.max().item():.4f}, mean: {u2.mean().item():.4f}")
+        
+        seg_skip1 = self.seg_skip1(torch.cat([seg_u1, d1], dim=1))  # Combine up1 and down1
+        seg_u2 = self.seg_up2(seg_skip1)  # (B, 16, 96, 128) 
+        # print(f"After up2 - shape: {u2.shape}, min: {u2.min().item():.4f}, max: {u2.max().item():.4f}, mean: {u2.mean().item():.4f}")
+        
 
 
         # Output Heads
-        logits = self.seg_head(self.seg_norm(u2))  # (B, 3, 96, 128)
+        logits = self.seg_head(self.seg_norm(seg_u2))  # (B, 3, 96, 128)
         # print(f"Segmentation logits - shape: {logits.shape}")
         # print(f"Logits per class: {logits.mean(dim=(0,2,3))}")
         # print(f"Logits min: {logits.min().item():.4f}, max: {logits.max().item():.4f}, mean: {logits.mean().item():.4f}")
+        
+        
+        depth_u1 = self.depth_up1(d2)  # (B, 16, 48, 64)
+        
+        depth_skip1 = self.depth_skip1(torch.cat([depth_u1, d1], dim=1))  # Combine up1 and down1
+        depth_u2 = self.depth_up2(depth_skip1)  # (B, 16, 96, 128) 
 
-        depth = self.depth_head(u2)  # (B, 1, 96, 128)
+        depth = self.depth_head(depth_u2)  # (B, 1, 96, 128)
         # print(f"Depth output - shape: {depth.shape}, min: {depth.min().item():.4f}, max: {depth.max().item():.4f}, mean: {depth.mean().item():.4f}")
 
-        return logits, depth.squeeze(1)  # Constrain depth to [0, 1]
+        return logits, torch.sigmoid(depth).squeeze(1)  # Constrain depth to [0, 1]
 
     def predict(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -250,7 +267,7 @@ class Detector(torch.nn.Module):
         # print(f"Prediction counts: {torch.bincount(pred.view(-1))}")
 
         # Optional additional post-processing for depth only if needed
-        depth = torch.sigmoid(raw_depth) 
+        depth = raw_depth
 
         return pred, depth
 
