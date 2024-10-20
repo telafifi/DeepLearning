@@ -121,6 +121,26 @@ class Classifier(nn.Module):
         return self(x).argmax(dim=1)
 
 
+class ConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1):
+        super(ConvBlock, self).__init__()
+        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
+        self.bn = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        return self.relu(self.bn(self.conv(x)))
+
+class UpConvBlock(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=3, stride=2, padding=1, output_padding=1):
+        super(UpConvBlock, self).__init__()
+        self.upconv = nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride, padding, output_padding)
+        self.bn = nn.BatchNorm2d(out_channels)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        return self.relu(self.bn(self.upconv(x)))
+
 class Detector(torch.nn.Module):
     def __init__(
         self,
@@ -138,9 +158,26 @@ class Detector(torch.nn.Module):
 
         self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN))
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
+        
+        # Encoder: Down-sampling layers
+        self.down1 = ConvBlock(in_channels, 16, stride=2)  # (B, 16, 48, 64)
+        self.down2 = ConvBlock(16, 32, stride=2)  # (B, 32, 24, 32)
+        
+        # Decoder: Up-sampling layers
+        self.up1 = UpConvBlock(32, 16)  # (B, 16, 48, 64)
+        self.up2 = UpConvBlock(16, 16)  # (B, 16, 96, 128)
 
-        # TODO: implement
-        pass
+        # Segmentation Head: Predict 3 class logits
+        
+        self.seg_norm = nn.BatchNorm2d(16)
+        self.seg_head = nn.Conv2d(16, num_classes, kernel_size=1)  # (B, 3, 96, 128)
+
+        # Depth Head: Predict 1-channel depth map
+        self.depth_head = nn.Conv2d(16, 1, kernel_size=1)  # (B, 1, 96, 128)
+        
+        # Initialize segmentation head
+        nn.init.xavier_uniform_(self.seg_head.weight)
+        nn.init.constant_(self.seg_head.bias, 0)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -157,12 +194,34 @@ class Detector(torch.nn.Module):
         """
         # optional: normalizes the input
         z = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
+        # print(f"Normalized input - min: {z.min().item():.4f}, max: {z.max().item():.4f}, mean: {z.mean().item():.4f}")
 
-        # TODO: replace with actual forward pass
-        logits = torch.randn(x.size(0), 3, x.size(2), x.size(3))
-        raw_depth = torch.rand(x.size(0), x.size(2), x.size(3))
+        # Encoder
+        d1 = self.down1(z)  # (B, 16, 48, 64)
+        # print(f"After down1 - shape: {d1.shape}, min: {d1.min().item():.4f}, max: {d1.max().item():.4f}, mean: {d1.mean().item():.4f}")
 
-        return logits, raw_depth
+        d2 = self.down2(d1)  # (B, 32, 24, 32)
+        # print(f"After down2 - shape: {d2.shape}, min: {d2.min().item():.4f}, max: {d2.max().item():.4f}, mean: {d2.mean().item():.4f}")
+
+        
+        # Decoder
+        u1 = self.up1(d2)  # (B, 16, 48, 64)
+        # print(f"After up1 - shape: {u1.shape}, min: {u1.min().item():.4f}, max: {u1.max().item():.4f}, mean: {u1.mean().item():.4f}")
+
+        u2 = self.up2(u1 + d1)  # (B, 16, 96, 128) - Skip connection
+        # print(f"After up2 (with skip connection) - shape: {u2.shape}, min: {u2.min().item():.4f}, max: {u2.max().item():.4f}, mean: {u2.mean().item():.4f}")
+
+
+        # Output Heads
+        logits = self.seg_head(self.seg_norm(u2))  # (B, 3, 96, 128)
+        # print(f"Segmentation logits - shape: {logits.shape}")
+        # print(f"Logits per class: {logits.mean(dim=(0,2,3))}")
+        # print(f"Logits min: {logits.min().item():.4f}, max: {logits.max().item():.4f}, mean: {logits.mean().item():.4f}")
+
+        depth = self.depth_head(u2)  # (B, 1, 96, 128)
+        # print(f"Depth output - shape: {depth.shape}, min: {depth.min().item():.4f}, max: {depth.max().item():.4f}, mean: {depth.mean().item():.4f}")
+
+        return logits, depth.squeeze(1)  # Constrain depth to [0, 1]
 
     def predict(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -178,10 +237,20 @@ class Detector(torch.nn.Module):
                 - depth: normalized depth [0, 1] with shape (b, h, w)
         """
         logits, raw_depth = self(x)
+        
+        # print(f"Logits shape: {logits.shape}")
+        # print(f"Logits min: {logits.min().item()}, max: {logits.max().item()}, mean: {logits.mean().item()}")
+        # print(f"Logits per class: {logits.mean(dim=(0,2,3))}")  # Average logit for each class
+        
         pred = logits.argmax(dim=1)
+        
+        # Debugging: Print prediction statistics
+        # print(f"Predictions shape: {pred.shape}")
+        # print(f"Unique predictions: {torch.unique(pred)}")
+        # print(f"Prediction counts: {torch.bincount(pred.view(-1))}")
 
         # Optional additional post-processing for depth only if needed
-        depth = raw_depth
+        depth = torch.sigmoid(raw_depth) 
 
         return pred, depth
 
