@@ -162,17 +162,22 @@ class Detector(torch.nn.Module):
         # Encoder: Down-sampling layers
         self.down1 = ConvBlock(in_channels, 16, stride=2)  # (B, 16, 48, 64)
         self.down2 = ConvBlock(16, 32, stride=2)  # (B, 32, 24, 32)
+        self.down3 = ConvBlock(32, 64, stride=2)  # (B, 64, 24, 32)
         
         # Decoder: Up-sampling layers
-        self.seg_up1 = UpConvBlock(32, 16)  # (B, 16, 48, 64)
-        self.seg_skip1 = ConvBlock(32, 16)  # Combine up1 and down1
-        self.seg_up2 = UpConvBlock(16, 16)  # (B, 16, 96, 128)
+        self.seg_up1 = UpConvBlock(64, 32)  # (B, 32, 48, 64)
+        self.seg_skip1 = ConvBlock(64, 32)  # Combine up1 and down2
+        self.seg_up2 = UpConvBlock(32, 16)  # (B, 16, 96, 128)
+        self.seg_skip2 = ConvBlock(32, 16)  # Combine up2 and down1
+        self.seg_up3 = UpConvBlock(16, 16)  # (B, 16, 96, 128)
         
         
         # Decoder: Up-sampling layers
-        self.depth_up1 = UpConvBlock(32, 16)  # (B, 16, 48, 64)
-        self.depth_skip1 = ConvBlock(32, 16)  # Combine up1 and down1
-        self.depth_up2 = UpConvBlock(16, 16)  # (B, 16, 96, 128)
+        self.depth_up1 = UpConvBlock(64, 32)  # (B, 32, 48, 64)
+        self.depth_skip1 = ConvBlock(64, 32)  # Combine up1 and down2
+        self.depth_up2 = UpConvBlock(32, 16)  # (B, 16, 96, 128)
+        self.depth_skip2 = ConvBlock(32, 16)  # Combine up2 and down1
+        self.depth_up3 = UpConvBlock(16, 16)  # (B, 16, 96, 128)
 
         # Segmentation Head: Predict 3 class logits
         
@@ -203,40 +208,31 @@ class Detector(torch.nn.Module):
         """
         # optional: normalizes the input
         z = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
-        # print(f"Normalized input - min: {z.min().item():.4f}, max: {z.max().item():.4f}, mean: {z.mean().item():.4f}")
 
         # Encoder
         d1 = self.down1(z)  # (B, 16, 48, 64)
-        # print(f"After down1 - shape: {d1.shape}, min: {d1.min().item():.4f}, max: {d1.max().item():.4f}, mean: {d1.mean().item():.4f}")
-
         d2 = self.down2(d1)  # (B, 32, 24, 32)
-        # print(f"After down2 - shape: {d2.shape}, min: {d2.min().item():.4f}, max: {d2.max().item():.4f}, mean: {d2.mean().item():.4f}")
+        d3 = self.down3(d2)  # (B, 64, 24, 32)
 
         
         # Decoder
-        seg_u1 = self.seg_up1(d2)  # (B, 16, 48, 64)
-        # print(f"After up1 - shape: {u1.shape}, min: {u1.min().item():.4f}, max: {u1.max().item():.4f}, mean: {u1.mean().item():.4f}")
-        
-        seg_skip1 = self.seg_skip1(torch.cat([seg_u1, d1], dim=1))  # Combine up1 and down1
+        seg_u1 = self.seg_up1(d3)  # (B, 32, 48, 64)
+        seg_skip1 = self.seg_skip1(torch.cat([seg_u1, d2], dim=1))  # Combine up1 and down1
         seg_u2 = self.seg_up2(seg_skip1)  # (B, 16, 96, 128) 
-        # print(f"After up2 - shape: {u2.shape}, min: {u2.min().item():.4f}, max: {u2.max().item():.4f}, mean: {u2.mean().item():.4f}")
+        seg_skip2 = self.seg_skip2(torch.cat([seg_u2, d1], dim=1))  # Combine up1 and down1
+        seg_u3 = self.seg_up3(seg_skip2)  # (B, 16, 96, 128) 
         
-
-
         # Output Heads
-        logits = self.seg_head(self.seg_norm(seg_u2))  # (B, 3, 96, 128)
-        # print(f"Segmentation logits - shape: {logits.shape}")
-        # print(f"Logits per class: {logits.mean(dim=(0,2,3))}")
-        # print(f"Logits min: {logits.min().item():.4f}, max: {logits.max().item():.4f}, mean: {logits.mean().item():.4f}")
+        logits = self.seg_head(self.seg_norm(seg_u3))  # (B, 3, 96, 128)
         
         
-        depth_u1 = self.depth_up1(d2)  # (B, 16, 48, 64)
-        
-        depth_skip1 = self.depth_skip1(torch.cat([depth_u1, d1], dim=1))  # Combine up1 and down1
+        depth_u1 = self.depth_up1(d3)  # (B, 32, 48, 64)
+        depth_skip1 = self.depth_skip1(torch.cat([depth_u1, d2], dim=1))  # Combine up1 and down1
         depth_u2 = self.depth_up2(depth_skip1)  # (B, 16, 96, 128) 
+        depth_skip2 = self.depth_skip2(torch.cat([depth_u2, d1], dim=1))  # Combine up1 and down1
+        depth_u3 = self.depth_up3(depth_skip2)  # (B, 16, 96, 128) 
 
-        depth = self.depth_head(depth_u2)  # (B, 1, 96, 128)
-        # print(f"Depth output - shape: {depth.shape}, min: {depth.min().item():.4f}, max: {depth.max().item():.4f}, mean: {depth.mean().item():.4f}")
+        depth = self.depth_head(depth_u3)  # (B, 1, 96, 128)
 
         return logits, torch.sigmoid(depth).squeeze(1)  # Constrain depth to [0, 1]
 
