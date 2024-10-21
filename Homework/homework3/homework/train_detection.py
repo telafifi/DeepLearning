@@ -48,7 +48,7 @@ def train(
 
     # Loss functions and optimizer
     seg_loss_func = nn.CrossEntropyLoss()
-    depth_loss_func = nn.L1Loss()
+    depth_loss_func = nn.functional.smooth_l1_loss
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     # Initialize metrics
@@ -80,6 +80,7 @@ def train(
 
             optimizer.zero_grad()
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)  # Gradient clipping
             optimizer.step()
             
             total_loss += loss.item()
@@ -131,7 +132,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, required=True)
     parser.add_argument("--num_epoch", type=int, default=60)
     parser.add_argument("--num_classes", type=int, default=3)
-    parser.add_argument("--lr", type=float, default=1e-2)
+    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=2024)
 
     train(**vars(parser.parse_args()))
