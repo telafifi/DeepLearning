@@ -251,21 +251,9 @@ class Detector(torch.nn.Module):
         """
         logits, raw_depth = self(x)
         
-        # print(f"Logits shape: {logits.shape}")
-        # print(f"Logits min: {logits.min().item()}, max: {logits.max().item()}, mean: {logits.mean().item()}")
-        # print(f"Logits per class: {logits.mean(dim=(0,2,3))}")  # Average logit for each class
-        
         pred = logits.argmax(dim=1)
-        
-        # Debugging: Print prediction statistics
-        # print(f"Predictions shape: {pred.shape}")
-        # print(f"Unique predictions: {torch.unique(pred)}")
-        # print(f"Prediction counts: {torch.bincount(pred.view(-1))}")
 
-        # Optional additional post-processing for depth only if needed
-        depth = raw_depth
-
-        return pred, depth
+        return pred, raw_depth
 
 
 MODEL_FACTORY = {
