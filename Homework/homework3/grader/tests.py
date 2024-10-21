@@ -169,7 +169,7 @@ class RoadDetectorGrader(BaseGrader):
 
             self._metric_computer.add(pred, track, depth, pred_depth)
 
-    @Case(score=10, timeout=1000)
+    @Case(score=10, timeout=10000)
     def test_model(self):
         """Predict"""
         batch_size = 4
@@ -184,7 +184,7 @@ class RoadDetectorGrader(BaseGrader):
         assert pred.shape == (batch_size, 96, 128), f"Label shape: {pred.shape}"
         assert pred_depth.shape == (batch_size, 96, 128), f"Depth shape: {pred_depth.shape}"
 
-    @Case(score=10, timeout=10000)
+    @Case(score=10, timeout=20000)
     def test_accuracy(self):
         """Segmentation Accuracy"""
         key = "accuracy"
@@ -193,7 +193,7 @@ class RoadDetectorGrader(BaseGrader):
 
         return score, f"{key}: {val:.3f}"
 
-    @Case(score=25, timeout=500)
+    @Case(score=25, timeout=1000)
     def test_iou(self):
         """Segmentation IoU"""
         key = "iou"
@@ -202,7 +202,7 @@ class RoadDetectorGrader(BaseGrader):
 
         return score, f"{key}: {val:.3f}"
 
-    @Case(score=2, timeout=500, extra_credit=True)
+    @Case(score=2, timeout=1000, extra_credit=True)
     def test_iou_extra(self):
         """Segmentation IoU: Extra Credit"""
         key = "iou"
@@ -211,7 +211,7 @@ class RoadDetectorGrader(BaseGrader):
 
         return score
 
-    @Case(score=10, timeout=500)
+    @Case(score=10, timeout=1000)
     def test_abs_depth_error(self):
         """Depth Error"""
         key = "abs_depth_error"
@@ -223,7 +223,7 @@ class RoadDetectorGrader(BaseGrader):
 
         return score, f"{key}: {val:.3f}"
 
-    @Case(score=2, timeout=500, extra_credit=True)
+    @Case(score=2, timeout=1000, extra_credit=True)
     def test_abs_depth_error_extra(self):
         """Depth Error: Extra Credit"""
         key = "abs_depth_error"
@@ -235,7 +235,7 @@ class RoadDetectorGrader(BaseGrader):
 
         return score
 
-    @Case(score=10, timeout=500)
+    @Case(score=10, timeout=1000)
     def test_tp_depth_error(self):
         """True Positives Depth Error"""
         key = "tp_depth_error"

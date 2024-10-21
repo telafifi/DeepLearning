@@ -148,6 +148,7 @@ class ConfusionMatrix:
         class_iou = true_pos / (self.matrix.sum(0) + self.matrix.sum(1) - true_pos + 1e-5)
         mean_iou = class_iou.mean().item()
         accuracy = (true_pos.sum() / (self.matrix.sum() + 1e-5)).item()
+        print("Class IoUs:", class_iou)
 
         return {
             "iou": mean_iou,
