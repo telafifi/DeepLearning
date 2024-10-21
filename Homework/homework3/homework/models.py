@@ -140,6 +140,38 @@ class UpConvBlock(nn.Module):
 
     def forward(self, x):
         return self.relu(self.bn(self.upconv(x)))
+    
+class Encoder(nn.Module):
+    def __init__(self, in_channels):
+        super(Encoder, self).__init__()
+        self.down1 = ConvBlock(in_channels, 16, stride=2)  # (B, 16, 48, 64)
+        self.down2 = ConvBlock(16, 32, stride=2)  # (B, 32, 24, 32)
+        self.down3 = ConvBlock(32, 64, stride=2)  # (B, 64, 24, 32)
+        
+    def forward(self, x):
+        d1 = self.down1(x)  # (B, 16, 48, 64)
+        d2 = self.down2(d1)  # (B, 32, 24, 32)
+        d3 = self.down3(d2)  # (B, 64, 24, 32)
+        
+        return d1, d2, d3
+    
+class Decoder(nn.Module):
+    def __init__(self):
+        super(Decoder, self).__init__()
+        self.up1 = UpConvBlock(64, 32)  # (B, 32, 48, 64)
+        self.skip1 = ConvBlock(64, 32)  # Combine up1 and down2
+        self.up2 = UpConvBlock(32, 16)  # (B, 16, 96, 128)
+        self.skip2 = ConvBlock(32, 16)  # Combine up2 and down1
+        self.up3 = UpConvBlock(16, 16)  # (B, 16, 96, 128)
+        
+    def forward(self, d1, d2, d3):
+        u1 = self.up1(d3)  # (B, 32, 48, 64)
+        skip1 = self.skip1(torch.cat([u1, d2], dim=1))  # Combine up1 and down1
+        u2 = self.up2(skip1)  # (B, 16, 96, 128) 
+        skip2 = self.skip2(torch.cat([u2, d1], dim=1))  # Combine up1 and down1
+        u3 = self.up3(skip2)  # (B, 16, 96, 128) 
+        
+        return u3
 
 class Detector(torch.nn.Module):
     def __init__(
@@ -160,24 +192,10 @@ class Detector(torch.nn.Module):
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
         
         # Encoder: Down-sampling layers
-        self.down1 = ConvBlock(in_channels, 16, stride=2)  # (B, 16, 48, 64)
-        self.down2 = ConvBlock(16, 32, stride=2)  # (B, 32, 24, 32)
-        self.down3 = ConvBlock(32, 64, stride=2)  # (B, 64, 24, 32)
-        
+        self.encoder = Encoder(in_channels)
+
         # Decoder: Up-sampling layers
-        self.seg_up1 = UpConvBlock(64, 32)  # (B, 32, 48, 64)
-        self.seg_skip1 = ConvBlock(64, 32)  # Combine up1 and down2
-        self.seg_up2 = UpConvBlock(32, 16)  # (B, 16, 96, 128)
-        self.seg_skip2 = ConvBlock(32, 16)  # Combine up2 and down1
-        self.seg_up3 = UpConvBlock(16, 16)  # (B, 16, 96, 128)
-        
-        
-        # Decoder: Up-sampling layers
-        self.depth_up1 = UpConvBlock(64, 32)  # (B, 32, 48, 64)
-        self.depth_skip1 = ConvBlock(64, 32)  # Combine up1 and down2
-        self.depth_up2 = UpConvBlock(32, 16)  # (B, 16, 96, 128)
-        self.depth_skip2 = ConvBlock(32, 16)  # Combine up2 and down1
-        self.depth_up3 = UpConvBlock(16, 16)  # (B, 16, 96, 128)
+        self.decoder = Decoder()
 
         # Segmentation Head: Predict 3 class logits
         
@@ -210,29 +228,20 @@ class Detector(torch.nn.Module):
         z = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
 
         # Encoder
-        d1 = self.down1(z)  # (B, 16, 48, 64)
-        d2 = self.down2(d1)  # (B, 32, 24, 32)
-        d3 = self.down3(d2)  # (B, 64, 24, 32)
+        d1, d2, d3 = self.encoder(z)
 
         
-        # Decoder
-        seg_u1 = self.seg_up1(d3)  # (B, 32, 48, 64)
-        seg_skip1 = self.seg_skip1(torch.cat([seg_u1, d2], dim=1))  # Combine up1 and down1
-        seg_u2 = self.seg_up2(seg_skip1)  # (B, 16, 96, 128) 
-        seg_skip2 = self.seg_skip2(torch.cat([seg_u2, d1], dim=1))  # Combine up1 and down1
-        seg_u3 = self.seg_up3(seg_skip2)  # (B, 16, 96, 128) 
+        # Decoder Segmentation
+        seg_dec = self.decoder(d1, d2, d3)
         
         # Output Heads
-        logits = self.seg_head(self.seg_norm(seg_u3))  # (B, 3, 96, 128)
+        logits = self.seg_head(self.seg_norm(seg_dec))  # (B, 3, 96, 128)
         
+        # Decoder Depth
+        depth_dec = self.decoder(d1, d2, d3)
         
-        depth_u1 = self.depth_up1(d3)  # (B, 32, 48, 64)
-        depth_skip1 = self.depth_skip1(torch.cat([depth_u1, d2], dim=1))  # Combine up1 and down1
-        depth_u2 = self.depth_up2(depth_skip1)  # (B, 16, 96, 128) 
-        depth_skip2 = self.depth_skip2(torch.cat([depth_u2, d1], dim=1))  # Combine up1 and down1
-        depth_u3 = self.depth_up3(depth_skip2)  # (B, 16, 96, 128) 
-
-        depth = self.depth_head(depth_u3)  # (B, 1, 96, 128)
+        # Output Heads
+        depth = self.depth_head(depth_dec)  # (B, 1, 96, 128)
 
         return logits, torch.sigmoid(depth).squeeze(1)  # Constrain depth to [0, 1]
 
