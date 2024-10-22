@@ -18,7 +18,6 @@ class Classifier(nn.Module):
             self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
             self.bn = nn.BatchNorm2d(out_channels)
             self.relu = nn.ReLU()
-            self.pool = nn.MaxPool2d(2, 2)
             
             self.model = nn.Sequential(
                 self.conv,
@@ -37,9 +36,6 @@ class Classifier(nn.Module):
         def forward(self, x):
             # Only apply pooling if spatial dimensions are large enough
             x = self.skip(x) + self.model(x)
-            
-            if x.size(2) > 1 and x.size(3) > 1:  # Check spatial size
-                x = self.pool(x)
                 
             return x
 
@@ -71,7 +67,7 @@ class Classifier(nn.Module):
             c2 = c1 * 2
             cnn_layers.append(self.Block(c1, c2, kernel_size=3, stride=2))
             c1 = c2
-        # cnn_layers.append(torch.nn.Conv2d(c1, 1, kernel_size=1))
+        cnn_layers.append(torch.nn.Conv2d(c1, c1, kernel_size=1))
         cnn_layers.append(torch.nn.AdaptiveAvgPool2d(1))
         self.network = torch.nn.Sequential(*cnn_layers)
         

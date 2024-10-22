@@ -47,7 +47,7 @@ def train(
 
     # Create loss function and optimizer
     loss_func = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
     global_step = 0
     metrics = {"train_acc": [], "val_acc": []}
@@ -106,12 +106,12 @@ def train(
         logger.add_scalar("Val/Accuracy", epoch_val_acc, epoch)
 
         # print on first, last, every 10th epoch
-        if epoch == 0 or epoch == num_epoch - 1 or (epoch + 1) % 10 == 0:
-            print(
-                f"Epoch {epoch + 1:2d} / {num_epoch:2d}: "
-                f"train_acc={epoch_train_acc:.4f} "
-                f"val_acc={epoch_val_acc:.4f}"
-            )
+        # if epoch == 0 or epoch == num_epoch - 1 or (epoch + 1) % 10 == 0:
+        print(
+            f"Epoch {epoch + 1:2d} / {num_epoch:2d}: "
+            f"train_acc={epoch_train_acc:.4f} "
+            f"val_acc={epoch_val_acc:.4f}"
+        )
 
     # save and overwrite the model in the root directory with the final model
     save_model(model)
@@ -126,7 +126,7 @@ if __name__ == "__main__":
 
     parser.add_argument("--exp_dir", type=str, default="logs")
     parser.add_argument("--model_name", type=str, required=True)
-    parser.add_argument("--num_epoch", type=int, default=100)
+    parser.add_argument("--num_epoch", type=int, default=60)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=2024)
 
