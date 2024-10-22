@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.utils.tensorboard as tb
 
 from .models import load_model, save_model
-from .metrics import AccuracyMetric, DetectionMetric
+from .metrics import DetectionMetric
 from .datasets.road_dataset import load_data
 
 def train(
@@ -49,7 +49,7 @@ def train(
     # Loss functions and optimizer
     seg_loss_func = nn.CrossEntropyLoss()
     depth_loss_func = nn.functional.smooth_l1_loss
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
     # Initialize metrics
     train_metric = DetectionMetric(num_classes=num_classes)
@@ -112,13 +112,6 @@ def train(
         print(f"Epoch {epoch+1}/{num_epoch}")
         print(f"Train Loss: {total_loss:.4f}")
         print(f"Val IoU: {val_metrics['iou']:.4f}, Val Depth Error: {val_metrics['abs_depth_error']:.4f}, Accuracy: {val_metrics['accuracy']:.4f}")
-        # Print metrics at the end of each epoch
-        # print(
-        #     f"Epoch {epoch + 1}/{num_epoch} "
-        #     f"Val IoU: {val_metrics['iou']:.4f}, "
-        #     f"Val Abs Depth Error: {val_metrics['abs_depth_error']:.4f}, "
-        #     f"Val TP Depth Error: {val_metrics['tp_depth_error']:.4f}"
-        # )
 
     # Save the model after training
     save_model(model)
@@ -132,7 +125,7 @@ if __name__ == "__main__":
     parser.add_argument("--model_name", type=str, required=True)
     parser.add_argument("--num_epoch", type=int, default=60)
     parser.add_argument("--num_classes", type=int, default=3)
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--lr", type=float, default=1e-2)
     parser.add_argument("--seed", type=int, default=2024)
 
     train(**vars(parser.parse_args()))
