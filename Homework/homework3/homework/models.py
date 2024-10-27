@@ -57,25 +57,32 @@ class Classifier(nn.Module):
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD))
         
         n_blocks = 4
+        
+        # Convolutional layers, starting with a large kernel size to capture global features
+        # Followed by a series of blocks with increasing number of channels
         cnn_layers = [
             torch.nn.Conv2d(3, in_channels, kernel_size=11, stride=2, padding=5),
             torch.nn.ReLU(),
         ]
         
+        # Add blocks with increasing number of channels
         c1 = in_channels
         for _ in range(n_blocks):
             c2 = c1 * 2
             cnn_layers.append(self.Block(c1, c2, kernel_size=3, stride=2))
             c1 = c2
+            
+        # Perform convolution with a 1x1 kernel and then global average pooling
+        # to allow for classification
         cnn_layers.append(torch.nn.Conv2d(c1, c1, kernel_size=1))
         cnn_layers.append(torch.nn.AdaptiveAvgPool2d(1))
         self.network = torch.nn.Sequential(*cnn_layers)
         
         # Fully connected layers
-        self.fc1 = nn.Linear(c1, 256)  # After 3 poolings, (64 / 2^3) = 8
+        self.fc1 = nn.Linear(c1, 256)
         self.fc2 = nn.Linear(256, num_classes)
         
-        # Regularization
+        # Regularization - Dropout is applied to the fully connected layers to prevent overfitting
         self.dropout = nn.Dropout(0.5)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -118,6 +125,9 @@ class Classifier(nn.Module):
 
 
 class ConvBlock(nn.Module):
+    """
+    A Convolutional Block with Convolution, Batch Normalization, and ReLU Activation
+    """
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=1, padding=1):
         super(ConvBlock, self).__init__()
         self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
@@ -128,6 +138,10 @@ class ConvBlock(nn.Module):
         return self.relu(self.bn(self.conv(x)))
 
 class UpConvBlock(nn.Module):
+    """
+    A convolution block that performs up-sampling using ConvTranspose2d, thereby increasing the spatial dimensions
+    of the input tensor.
+    """
     def __init__(self, in_channels, out_channels, kernel_size=3, stride=2, padding=1, output_padding=1):
         super(UpConvBlock, self).__init__()
         self.upconv = nn.ConvTranspose2d(in_channels, out_channels, kernel_size, stride, padding, output_padding)
@@ -136,8 +150,12 @@ class UpConvBlock(nn.Module):
 
     def forward(self, x):
         return self.relu(self.bn(self.upconv(x)))
-    
+
 class Encoder(nn.Module):
+    """
+    An encoder that downsamples the input image to extract features
+    using three separate layers with increasing number of channels
+    """
     def __init__(self, in_channels):
         super(Encoder, self).__init__()
         self.down1 = ConvBlock(in_channels, 16, stride=2)  # (B, 16, 48, 64)
@@ -152,6 +170,10 @@ class Encoder(nn.Module):
         return d1, d2, d3
     
 class Decoder(nn.Module):
+    """
+    A decoder that upsamples the features extracted by the encoder to generate
+    segmentation masks and depth maps
+    """
     def __init__(self):
         super(Decoder, self).__init__()
         self.up1 = UpConvBlock(64, 32)  # (B, 32, 48, 64)
@@ -194,7 +216,6 @@ class Detector(torch.nn.Module):
         self.decoder = Decoder()
 
         # Segmentation Head: Predict 3 class logits
-        
         self.seg_norm = nn.BatchNorm2d(16)
         self.seg_head = nn.Conv2d(16, num_classes, kernel_size=1)  # (B, 3, 96, 128)
 
