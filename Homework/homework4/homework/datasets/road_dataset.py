@@ -116,4 +116,6 @@ def load_data(
         num_workers=num_workers,
         batch_size=batch_size,
         shuffle=shuffle,
+        persistent_workers=True,
+        drop_last=True,
     )
