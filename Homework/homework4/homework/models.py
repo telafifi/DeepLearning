@@ -22,6 +22,7 @@ class MLPPlanner(nn.Module):
                 nn.Linear(in_channels, out_channels),
                 nn.LayerNorm(out_channels),
                 nn.ReLU(),
+                nn.Dropout(0.1),
             )
             
             # Skip connection to allow for residual learning
@@ -46,6 +47,9 @@ class MLPPlanner(nn.Module):
             n_waypoints (int): number of waypoints to predict
         """
         super().__init__()
+        # Register input normalization parameters as buffers
+        self.register_buffer('input_mean', torch.tensor(INPUT_MEAN[:2], dtype=torch.float32))
+        self.register_buffer('input_std', torch.tensor(INPUT_STD[:2], dtype=torch.float32))
 
         self.n_track = n_track
         self.n_waypoints = n_waypoints
@@ -80,6 +84,13 @@ class MLPPlanner(nn.Module):
 
         # Sequential model
         self.model = nn.Sequential(*layers)
+        
+
+    def normalize_input(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Normalize input using predefined mean and std
+        """
+        return (x - self.input_mean[None, None, :]) / self.input_std[None, None, :]
 
     def forward(
         self,
@@ -103,6 +114,10 @@ class MLPPlanner(nn.Module):
         # Get batch size and number of track points
         batch_size, n_track, _ = track_left.shape
         
+        # Normalize inputs
+        track_left = self.normalize_input(track_left)
+        track_right = self.normalize_input(track_right)
+
         # Concatenate left and right track boundaries along the feature dimension
         # New shape: (b, n_track, 4)
         track_features = torch.cat([track_left, track_right], dim=-1)
