@@ -11,31 +11,6 @@ from .models import load_model, save_model
 from .metrics import PlannerMetric
 from .datasets.road_dataset import load_data
 
-def masked_mse_loss(preds: torch.Tensor, targets: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
-    """
-    Compute masked MSE loss for waypoint prediction
-    
-    Args:
-        preds: Predicted waypoints (batch_size, n_waypoints, 2)
-        targets: Target waypoints (batch_size, n_waypoints, 2) 
-        mask: Boolean mask (batch_size, n_waypoints)
-    
-    Returns:
-        Masked MSE loss averaged over valid points
-    """
-    # Convert mask to float and add coordinate dimension
-    mask = mask.float().unsqueeze(-1)  # Add dimension for coordinates
-    
-    # Only compute loss for valid waypoints
-    squared_diff = (preds - targets) ** 2
-    masked_diff = squared_diff * mask  # Zero out invalid waypoints
-    
-    # Average only over valid points
-    valid_points = mask.sum() + 1e-6  # Add small epsilon to avoid division by zero
-    loss = masked_diff.sum() / valid_points
-    
-    return loss
-
 def masked_l1_loss(preds: torch.Tensor, targets: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
     """
     Compute masked L1 loss for waypoint prediction
@@ -102,7 +77,6 @@ def train(
     val_data = load_data("drive_data/val", shuffle=False)
     
     # Create loss function and optimizer
-    loss_func = nn.L1Loss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     
     # Need to initialize metrics
