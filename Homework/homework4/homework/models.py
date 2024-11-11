@@ -90,7 +90,7 @@ class MLPPlanner(nn.Module):
         """
         Normalize input using predefined mean and std
         """
-        return (x - self.input_mean[None, None, :]) / self.input_std[None, None, :]
+        return (x - self.input_mean.to(x.device)[None, None, :]) / self.input_std.to(x.device)[None, None, :]
 
     def forward(
         self,

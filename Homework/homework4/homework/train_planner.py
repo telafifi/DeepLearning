@@ -23,17 +23,48 @@ def masked_mse_loss(preds: torch.Tensor, targets: torch.Tensor, mask: torch.Tens
     Returns:
         Masked MSE loss averaged over valid points
     """
-    # Compute squared error
-    squared_error = (preds - targets) ** 2  # (batch_size, n_waypoints, 2)
+    # Convert mask to float and add coordinate dimension
+    mask = mask.float().unsqueeze(-1)  # Add dimension for coordinates
     
-    # Sum over coordinate dimensions (x,y)
-    point_wise_mse = squared_error.sum(dim=-1)  # (batch_size, n_waypoints)
+    # Only compute loss for valid waypoints
+    squared_diff = (preds - targets) ** 2
+    masked_diff = squared_diff * mask  # Zero out invalid waypoints
     
-    # Apply mask and average over valid points
-    mask = mask.float()
-    masked_mse = (point_wise_mse * mask).sum() / (mask.sum() + 1e-6)
+    # Average only over valid points
+    valid_points = mask.sum() + 1e-6  # Add small epsilon to avoid division by zero
+    loss = masked_diff.sum() / valid_points
     
-    return masked_mse
+    return loss
+
+def masked_l1_loss(preds: torch.Tensor, targets: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+    """
+    Compute masked L1 loss for waypoint prediction
+    
+    Args:
+        preds: Predicted waypoints (batch_size, n_waypoints, 2)
+        targets: Target waypoints (batch_size, n_waypoints, 2) 
+        mask: Boolean mask (batch_size, n_waypoints)
+    
+    Returns:
+        Masked L1 loss averaged over valid points, with longitudinal error weighted double
+    """
+    # Convert mask to float and add coordinate dimension
+    mask = mask.float().unsqueeze(-1)  # (batch_size, n_waypoints, 1)
+    
+    # Compute L1 (absolute) differences
+    l1_diff = torch.abs(preds - targets)  # (batch_size, n_waypoints, 2)
+    
+    # Apply mask
+    masked_diff = l1_diff * mask
+    
+    # Compute separate longitudinal (x) and lateral (y) errors
+    longitudinal_loss = masked_diff[..., 0].sum() / (mask[..., 0].sum() + 1e-6)
+    lateral_loss = masked_diff[..., 1].sum() / (mask[..., 0].sum() + 1e-6)
+    
+    # Weight longitudinal error double
+    total_loss = longitudinal_loss + lateral_loss
+    
+    return total_loss
 
 def train(
     exp_dir: str = "logs",
@@ -71,7 +102,7 @@ def train(
     val_data = load_data("drive_data/val", shuffle=False)
     
     # Create loss function and optimizer
-    loss_func = nn.CrossEntropyLoss()
+    loss_func = nn.L1Loss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     
     # Need to initialize metrics
@@ -95,13 +126,10 @@ def train(
             optimizer.zero_grad()
             
             preds = model(track_left, track_right, **kwargs)
-            loss = masked_mse_loss(preds, waypoints, waypoints_mask)
+            loss = masked_l1_loss(preds, waypoints, waypoints_mask)
             
-            optimizer.zero_grad()
             loss.backward()
-            
             optimizer.step()
-            
 
             global_step += 1
             total_loss += loss.item()
@@ -157,8 +185,8 @@ if __name__ == "__main__":
 
     parser.add_argument("--exp_dir", type=str, default="logs")
     parser.add_argument("--model_name", type=str, required=True)
-    parser.add_argument("--num_epoch", type=int, default=60)
-    parser.add_argument("--lr", type=float, default=1e-2)
+    parser.add_argument("--num_epoch", type=int, default=70)
+    parser.add_argument("--lr", type=float, default=5e-3)
     parser.add_argument("--seed", type=int, default=2024)
 
     train(**vars(parser.parse_args()))
