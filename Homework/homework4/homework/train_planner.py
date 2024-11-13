@@ -159,8 +159,14 @@ if __name__ == "__main__":
 
     parser.add_argument("--exp_dir", type=str, default="logs")
     parser.add_argument("--model_name", type=str, required=True)
-    parser.add_argument("--num_epoch", type=int, default=70)
-    parser.add_argument("--lr", type=float, default=5e-3)
+    # MLP Number of epochs
+    # parser.add_argument("--num_epoch", type=int, default=70)
+    #Transformer Number of epochs
+    parser.add_argument("--num_epoch", type=int, default=30)
+    # MLP Learning rate
+    # parser.add_argument("--lr", type=float, default=5e-3)
+    # Transformer Learning rate
+    parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=2024)
 
     train(**vars(parser.parse_args()))
