@@ -149,8 +149,33 @@ class TransformerPlanner(nn.Module):
 
         self.n_track = n_track
         self.n_waypoints = n_waypoints
-
+        # Learned query embeddings for waypoints
         self.query_embed = nn.Embedding(n_waypoints, d_model)
+        
+        # Linear layers to project track points to d_model dimension
+        self.track_encoder = nn.Sequential(
+            nn.Linear(2, d_model),
+            nn.LayerNorm(d_model),
+            nn.ReLU(),
+        )
+        
+        # Transformer decoder layer with cross-attention
+        self.transformer_layer = nn.TransformerDecoderLayer(
+            d_model=d_model,
+            nhead=4,  # Using 4 heads since d_model = 64
+            dim_feedforward=256,
+            dropout=0.1,
+            batch_first=True
+        )
+        
+        # Stack multiple decoder layers
+        self.transformer = nn.TransformerDecoder(
+            self.transformer_layer,
+            num_layers=3
+        )
+        
+        # Output projection to predict waypoint coordinates
+        self.output_proj = nn.Linear(d_model, 2)
 
     def forward(
         self,
@@ -171,7 +196,26 @@ class TransformerPlanner(nn.Module):
         Returns:
             torch.Tensor: future waypoints with shape (b, n_waypoints, 2)
         """
-        raise NotImplementedError
+        batch_size = track_left.shape[0]
+        
+        # Combine and encode track points
+        # Shape: (b, 2*n_track, 2) -> (b, 2*n_track, d_model)
+        track_points = torch.cat([track_left, track_right], dim=1)
+        memory = self.track_encoder(track_points)
+        
+        # Get learned query embeddings
+        # Shape: (n_waypoints, d_model) -> (b, n_waypoints, d_model)
+        queries = self.query_embed.weight.unsqueeze(0).expand(batch_size, -1, -1)
+        
+        # Apply transformer decoder
+        # Shape: (b, n_waypoints, d_model)
+        decoded = self.transformer(queries, memory)
+        
+        # Project to waypoint coordinates
+        # Shape: (b, n_waypoints, 2)
+        waypoints = self.output_proj(decoded)
+        
+        return waypoints
 
 
 class CNNPlanner(torch.nn.Module):
