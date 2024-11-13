@@ -12,34 +12,140 @@ from .metrics import PlannerMetric
 from .datasets.road_dataset import load_data
 
 def masked_l1_loss(preds: torch.Tensor, targets: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+   """
+   Compute masked L1 loss for waypoint prediction, weighting longitudinal errors more heavily.
+   Longitudinal refers to forward/backward error while lateral refers to left/right error.
+   
+   Args:
+       preds: Predicted waypoints with shape (batch_size, n_waypoints, 2)
+              Where the last dimension contains (x,y) coordinates
+       targets: Ground truth waypoints with shape (batch_size, n_waypoints, 2)
+               Same format as predictions
+       mask: Boolean mask indicating valid waypoints with shape (batch_size, n_waypoints)
+             Used to ignore invalid/missing waypoints in loss calculation
+   
+   Returns:
+       torch.Tensor: Scalar loss value combining longitudinal and lateral errors,
+                    averaged over all valid waypoints
+   """
+   # Convert boolean mask to float and add dimension for coordinates
+   # Shape goes from (batch_size, n_waypoints) -> (batch_size, n_waypoints, 1)
+   # This allows broadcasting when multiplying with coordinate-wise differences
+   mask = mask.float().unsqueeze(-1)  
+   
+   # Compute absolute differences between predictions and targets
+   # Result shape: (batch_size, n_waypoints, 2)
+   # Where [..., 0] is longitudinal (x) error and [..., 1] is lateral (y) error
+   l1_diff = torch.abs(preds - targets)
+   
+   # Apply mask to ignore invalid waypoints
+   # Only include errors for waypoints where mask is True
+   masked_diff = l1_diff * mask
+   
+   # Compute average longitudinal (x) and lateral (y) errors separately
+   # Sum errors and divide by number of valid points
+   # Add small epsilon (1e-6) to avoid division by zero
+   longitudinal_loss = masked_diff[..., 0].sum() / (mask[..., 0].sum() + 1e-6)  # x-axis error
+   lateral_loss = masked_diff[..., 1].sum() / (mask[..., 0].sum() + 1e-6)      # y-axis error
+   
+   # Combine losses, double-weighting the longitudinal error
+   # This puts more emphasis on predicting the forward/backward position correctly
+   # compared to the left/right position
+   total_loss = longitudinal_loss + lateral_loss
+   
+   return total_loss
+
+def train_step(model, train_data, optimizer, device, **kwargs):
     """
-    Compute masked L1 loss for waypoint prediction
+    Performs one training epoch over the provided data.
     
     Args:
-        preds: Predicted waypoints (batch_size, n_waypoints, 2)
-        targets: Target waypoints (batch_size, n_waypoints, 2) 
-        mask: Boolean mask (batch_size, n_waypoints)
+        model: The neural network model to train
+        train_data: DataLoader containing training batches
+        optimizer: The optimizer used for updating model weights
+        device: Device to run computations on (cuda/cpu)
+        **kwargs: Additional arguments to pass to the model's forward pass
     
     Returns:
-        Masked L1 loss averaged over valid points, with longitudinal error weighted double
+        float: Average loss value across all batches in the epoch
     """
-    # Convert mask to float and add coordinate dimension
-    mask = mask.float().unsqueeze(-1)  # (batch_size, n_waypoints, 1)
+    # Set model to training mode - enables dropout, batch norm updates etc.
+    model.train()
     
-    # Compute L1 (absolute) differences
-    l1_diff = torch.abs(preds - targets)  # (batch_size, n_waypoints, 2)
+    # Initialize total loss accumulator for the epoch
+    total_loss = 0
     
-    # Apply mask
-    masked_diff = l1_diff * mask
+    # Iterate through batches in the training data
+    for batch in train_data:
+        # Move batch data to appropriate device (GPU/CPU)
+        track_left = batch["track_left"].to(device)      # Left lane boundaries
+        track_right = batch["track_right"].to(device)    # Right lane boundaries
+        waypoints = batch["waypoints"].to(device)        # Target waypoints
+        waypoints_mask = batch["waypoints_mask"].to(device)  # Mask for valid waypoints
+        
+        # Zero out gradients from previous batch
+        # This is necessary because PyTorch accumulates gradients
+        optimizer.zero_grad()
+        
+        # Forward pass: compute model predictions
+        # **kwargs allows passing additional arguments to model.forward()
+        preds = model(track_left, track_right, **kwargs)
+        
+        # Compute loss using masked L1 loss
+        # This ignores invalid waypoints during loss calculation
+        loss = masked_l1_loss(preds, waypoints, waypoints_mask)
+        
+        # Backward pass: compute gradients
+        loss.backward()
+        
+        # Update model weights using the optimizer
+        optimizer.step()
+        
+        # Accumulate batch loss
+        total_loss += loss.item()  # .item() gets the scalar value from the loss tensor
     
-    # Compute separate longitudinal (x) and lateral (y) errors
-    longitudinal_loss = masked_diff[..., 0].sum() / (mask[..., 0].sum() + 1e-6)
-    lateral_loss = masked_diff[..., 1].sum() / (mask[..., 0].sum() + 1e-6)
-    
-    # Weight longitudinal error double
-    total_loss = longitudinal_loss + lateral_loss
+    # Compute average loss across all batches
+    total_loss /= len(train_data)
     
     return total_loss
+    
+def validation_step(model, val_data, metrics, device, **kwargs):
+    """
+   Performs validation on the model using validation data. 
+   Calculates performance metrics without updating model weights.
+   
+   Args:
+       model: The neural network model to evaluate
+       val_data: DataLoader containing validation batches 
+       metrics: Object that tracks and computes evaluation metrics
+       device: Device to run computations on (cuda/cpu)
+       **kwargs: Additional arguments to pass to model's forward pass
+   """
+   # Context manager that disables gradient computation
+   # This saves memory and speeds up validation since we don't need gradients
+    with torch.inference_mode():
+       # Set model to evaluation mode - disables dropout, uses running stats for batch norm
+       model.eval()
+
+       # Iterate through validation batches
+       for batch in val_data:
+           # Move batch data to appropriate device (GPU/CPU)
+           track_left = batch["track_left"].to(device)      # Left lane boundaries
+           track_right = batch["track_right"].to(device)    # Right lane boundaries
+           waypoints = batch["waypoints"].to(device)        # Ground truth waypoints 
+           waypoints_mask = batch["waypoints_mask"].to(device)  # Mask for valid waypoints
+
+           # Forward pass only - no loss calculation or backprop needed
+           # We only want to evaluate model predictions during validation
+           preds = model(track_left, track_right, **kwargs)
+           
+           # Update running metrics (e.g., longitudinal/lateral errors)
+           # metrics.add() accumulates statistics across all validation batches
+           # These will be used to compute final validation metrics after all batches
+           metrics.add(preds, waypoints, waypoints_mask)
+
+       # Note: Final metric computation typically happens outside this function
+       # by calling metrics.compute() after all validation batches are processed
 
 def train(
     exp_dir: str = "logs",
@@ -80,7 +186,6 @@ def train(
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
     
     # Need to initialize metrics
-    global_step = 0
     metrics = PlannerMetric()
     
     # Training loop
@@ -89,44 +194,9 @@ def train(
         # clear metrics at beginning of epoch
         metrics.reset()
         
-        model.train()
-        total_loss = 0
-        
-        for batch in train_data:
-            track_left = batch["track_left"].to(device)
-            track_right = batch["track_right"].to(device)
-            waypoints = batch["waypoints"].to(device)
-            waypoints_mask = batch["waypoints_mask"].to(device)
-            optimizer.zero_grad()
+        total_loss = train_step(model, train_data, optimizer, device, **kwargs)
             
-            preds = model(track_left, track_right, **kwargs)
-            loss = masked_l1_loss(preds, waypoints, waypoints_mask)
-            
-            loss.backward()
-            optimizer.step()
-
-            global_step += 1
-            total_loss += loss.item()
-            
-        total_loss /= len(train_data)
-            
-        # disable gradient computation and switch to evaluation mode
-        with torch.inference_mode():
-            model.eval()
-
-            for batch in val_data:
-                # Load the image and label to the device
-                track_left = batch["track_left"].to(device)
-                track_right = batch["track_right"].to(device)
-                waypoints = batch["waypoints"].to(device)
-                waypoints_mask = batch["waypoints_mask"].to(device)
-
-                # Forward pass through the model and calculate the accuracy
-                # No need to calculate the loss since we are only interested in the accuracy
-                # as this is the validation set
-                preds = model(track_left, track_right, **kwargs)
-                # Update metrics
-                metrics.add(preds, waypoints, waypoints_mask)
+        validation_step(model, val_data, metrics, device, **kwargs)
 
         val_metrics = metrics.compute()
         logger.add_scalar("L1_Error", val_metrics['l1_error'], epoch)
