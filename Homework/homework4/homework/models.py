@@ -259,16 +259,17 @@ class CNNPlanner(torch.nn.Module):
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD), persistent=False)
         
         n_blocks = 4
+        in_channels = 32
         
         # Convolutional layers, starting with a large kernel size to capture global features
         # Followed by a series of blocks with increasing number of channels
         cnn_layers = [
-            torch.nn.Conv2d(3, 32, kernel_size=11, stride=2, padding=5),
+            torch.nn.Conv2d(3, in_channels, kernel_size=11, stride=2, padding=5),
             torch.nn.ReLU(),
         ]
         
         # Add blocks with increasing number of channels
-        c1 = 32
+        c1 = in_channels
         for _ in range(n_blocks):
             c2 = c1 * 2
             cnn_layers.append(self.Block(c1, c2, kernel_size=3, stride=2))
@@ -281,11 +282,13 @@ class CNNPlanner(torch.nn.Module):
         self.network = torch.nn.Sequential(*cnn_layers)
         
         # Fully connected layers
-        self.fc1 = nn.Linear(c1, 256)
-        self.fc2 = nn.Linear(256, n_waypoints * 2)
-        
-        # Regularization - Dropout is applied to the fully connected layers to prevent overfitting
-        self.dropout = nn.Dropout(0.3)
+        self.fcc = nn.Sequential(
+            nn.Linear(c1, 256),
+            nn.ReLU(),
+            # Regularization - Dropout is applied to the fully connected layers to prevent overfitting
+            nn.Dropout(0.3),
+            nn.Linear(256, n_waypoints * 2),
+        )
 
     def forward(self, image: torch.Tensor, **kwargs) -> torch.Tensor:
         """
@@ -303,11 +306,7 @@ class CNNPlanner(torch.nn.Module):
         # Flatten the tensor for fully connected layers
         z = z.view(z.size(0), -1)  # Flatten -> (B, 128 * 8 * 8)
         
-        # Fully connected layers with dropout
-        z = nn.functional.relu(self.fc1(z))  # -> (B, 256)
-        z = self.dropout(z)
-        
-        logits = self.fc2(z)  # -> (B, num_classes)
+        logits = self.fcc(z)  # -> (B, n_waypoints)
         
         # Reshape to (B, n_waypoints, 2) for final waypoint coordinates
         waypoints = logits.view(-1, self.n_waypoints, 2)

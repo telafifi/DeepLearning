@@ -55,7 +55,7 @@ def masked_l1_loss(preds: torch.Tensor, targets: torch.Tensor, mask: torch.Tenso
    
    return total_loss
 
-def train_step(model, train_data, optimizer, device, **kwargs):
+def train_step(model, train_data, optimizer, device, model_name, **kwargs):
     """
     Performs one training epoch over the provided data.
     
@@ -91,11 +91,7 @@ def train_step(model, train_data, optimizer, device, **kwargs):
         
         # Forward pass: compute model predictions
         # **kwargs allows passing additional arguments to model.forward()
-        # Transformer or MLP Model
-        # preds = model(track_left, track_right, **kwargs)
-        
-        # CNN Model
-        preds = model(image, **kwargs)
+        preds = model(image, **kwargs) if model_name == 'cnn_planner' else model(track_left, track_right, **kwargs)
         
         # Compute loss using masked L1 loss
         # This ignores invalid waypoints during loss calculation
@@ -115,7 +111,7 @@ def train_step(model, train_data, optimizer, device, **kwargs):
     
     return total_loss
     
-def validation_step(model, val_data, metrics, device, **kwargs):
+def validation_step(model, val_data, metrics, device, model_name, **kwargs):
     """
    Performs validation on the model using validation data. 
    Calculates performance metrics without updating model weights.
@@ -144,11 +140,7 @@ def validation_step(model, val_data, metrics, device, **kwargs):
 
            # Forward pass only - no loss calculation or backprop needed
            # We only want to evaluate model predictions during validation
-           # Transformer or MLP Model
-           # preds = model(track_left, track_right, **kwargs)
-           
-           # CNN Model
-           preds = model(image, **kwargs)
+           preds = model(image, **kwargs) if model_name == 'cnn_planner' else model(track_left, track_right, **kwargs)
            
            # Update running metrics (e.g., longitudinal/lateral errors)
            # metrics.add() accumulates statistics across all validation batches
@@ -205,9 +197,9 @@ def train(
         # clear metrics at beginning of epoch
         metrics.reset()
         
-        total_loss = train_step(model, train_data, optimizer, device, **kwargs)
+        total_loss = train_step(model, train_data, optimizer, device, model_name, **kwargs)
             
-        validation_step(model, val_data, metrics, device, **kwargs)
+        validation_step(model, val_data, metrics, device, model_name, **kwargs)
 
         val_metrics = metrics.compute()
         logger.add_scalar("L1_Error", val_metrics['l1_error'], epoch)
@@ -216,15 +208,15 @@ def train(
         logger.add_scalar("Num_Samples", val_metrics['num_samples'], epoch)
 
         # print on first, last, every 10th epoch
-        # if epoch == 0 or epoch == num_epoch - 1 or (epoch + 1) % 10 == 0:
-        print(
-            f"Epoch {epoch + 1:2d} / {num_epoch:2d}: "
-            f"Train Loss: {total_loss:.4f} "
-            f"val_L1_err={val_metrics['l1_error']:.4f} "
-            f"val_Long_err={val_metrics['longitudinal_error']:.4f} "
-            f"val_Lat_err={val_metrics['lateral_error']:.4f} "
-            f"val_Num_Samples={val_metrics['num_samples']:.4f} "
-        )
+        if epoch == 0 or epoch == num_epoch - 1 or (epoch + 1) % 10 == 0:
+            print(
+                f"Epoch {epoch + 1:2d} / {num_epoch:2d}: "
+                f"Train Loss: {total_loss:.4f} "
+                f"val_L1_err={val_metrics['l1_error']:.4f} "
+                f"val_Long_err={val_metrics['longitudinal_error']:.4f} "
+                f"val_Lat_err={val_metrics['lateral_error']:.4f} "
+                f"val_Num_Samples={val_metrics['num_samples']:.4f} "
+            )
         
     # save and overwrite the model in the root directory with the final model
     save_model(model)
@@ -246,7 +238,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_epoch", type=int, default=30)
     # MLP Learning rate
     # parser.add_argument("--lr", type=float, default=5e-3)
-    # Transformer Learning rate
+    # Transformer & CNN Learning rate
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--seed", type=int, default=2024)
 
