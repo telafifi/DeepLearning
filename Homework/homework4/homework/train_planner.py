@@ -82,6 +82,8 @@ def train_step(model, train_data, optimizer, device, **kwargs):
         track_right = batch["track_right"].to(device)    # Right lane boundaries
         waypoints = batch["waypoints"].to(device)        # Target waypoints
         waypoints_mask = batch["waypoints_mask"].to(device)  # Mask for valid waypoints
+        image = batch["image"].to(device)
+        
         
         # Zero out gradients from previous batch
         # This is necessary because PyTorch accumulates gradients
@@ -89,7 +91,11 @@ def train_step(model, train_data, optimizer, device, **kwargs):
         
         # Forward pass: compute model predictions
         # **kwargs allows passing additional arguments to model.forward()
-        preds = model(track_left, track_right, **kwargs)
+        # Transformer or MLP Model
+        # preds = model(track_left, track_right, **kwargs)
+        
+        # CNN Model
+        preds = model(image, **kwargs)
         
         # Compute loss using masked L1 loss
         # This ignores invalid waypoints during loss calculation
@@ -134,10 +140,15 @@ def validation_step(model, val_data, metrics, device, **kwargs):
            track_right = batch["track_right"].to(device)    # Right lane boundaries
            waypoints = batch["waypoints"].to(device)        # Ground truth waypoints 
            waypoints_mask = batch["waypoints_mask"].to(device)  # Mask for valid waypoints
+           image = batch["image"].to(device)  # Mask for valid waypoints
 
            # Forward pass only - no loss calculation or backprop needed
            # We only want to evaluate model predictions during validation
-           preds = model(track_left, track_right, **kwargs)
+           # Transformer or MLP Model
+           # preds = model(track_left, track_right, **kwargs)
+           
+           # CNN Model
+           preds = model(image, **kwargs)
            
            # Update running metrics (e.g., longitudinal/lateral errors)
            # metrics.add() accumulates statistics across all validation batches

@@ -217,8 +217,36 @@ class TransformerPlanner(nn.Module):
         
         return waypoints
 
-
 class CNNPlanner(torch.nn.Module):
+    class Block(nn.Module):
+        def __init__(self, in_channels, out_channels, kernel_size=3, stride=1):
+            super().__init__()
+            padding = (kernel_size - 1) // 2
+            
+            self.conv = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding)
+            self.bn = nn.BatchNorm2d(out_channels)
+            self.relu = nn.ReLU()
+            
+            self.model = nn.Sequential(
+                self.conv,
+                self.bn,
+                self.relu,
+            )
+            
+            # Skip connection to allow for residual learning
+            # If the input and output dimensions are different, use a linear layer to match the dimensions
+            # Otherwise, use an identity function
+            if in_channels != out_channels:
+                self.skip = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=stride, padding=0)
+            else:
+                self.skip = nn.Identity()
+
+        def forward(self, x):
+            # Only apply pooling if spatial dimensions are large enough
+            x = self.skip(x) + self.model(x)
+                
+            return x
+    
     def __init__(
         self,
         n_waypoints: int = 3,
@@ -229,6 +257,35 @@ class CNNPlanner(torch.nn.Module):
 
         self.register_buffer("input_mean", torch.as_tensor(INPUT_MEAN), persistent=False)
         self.register_buffer("input_std", torch.as_tensor(INPUT_STD), persistent=False)
+        
+        n_blocks = 4
+        
+        # Convolutional layers, starting with a large kernel size to capture global features
+        # Followed by a series of blocks with increasing number of channels
+        cnn_layers = [
+            torch.nn.Conv2d(3, 32, kernel_size=11, stride=2, padding=5),
+            torch.nn.ReLU(),
+        ]
+        
+        # Add blocks with increasing number of channels
+        c1 = 32
+        for _ in range(n_blocks):
+            c2 = c1 * 2
+            cnn_layers.append(self.Block(c1, c2, kernel_size=3, stride=2))
+            c1 = c2
+            
+        # Perform convolution with a 1x1 kernel and then global average pooling
+        # to allow for classification
+        cnn_layers.append(torch.nn.Conv2d(c1, c1, kernel_size=1))
+        cnn_layers.append(torch.nn.AdaptiveAvgPool2d(1))
+        self.network = torch.nn.Sequential(*cnn_layers)
+        
+        # Fully connected layers
+        self.fc1 = nn.Linear(c1, 256)
+        self.fc2 = nn.Linear(256, n_waypoints * 2)
+        
+        # Regularization - Dropout is applied to the fully connected layers to prevent overfitting
+        self.dropout = nn.Dropout(0.3)
 
     def forward(self, image: torch.Tensor, **kwargs) -> torch.Tensor:
         """
@@ -240,8 +297,22 @@ class CNNPlanner(torch.nn.Module):
         """
         x = image
         x = (x - self.input_mean[None, :, None, None]) / self.input_std[None, :, None, None]
+        
+        z = self.network(x)
+        
+        # Flatten the tensor for fully connected layers
+        z = z.view(z.size(0), -1)  # Flatten -> (B, 128 * 8 * 8)
+        
+        # Fully connected layers with dropout
+        z = nn.functional.relu(self.fc1(z))  # -> (B, 256)
+        z = self.dropout(z)
+        
+        logits = self.fc2(z)  # -> (B, num_classes)
+        
+        # Reshape to (B, n_waypoints, 2) for final waypoint coordinates
+        waypoints = logits.view(-1, self.n_waypoints, 2)
 
-        raise NotImplementedError
+        return waypoints
 
 
 MODEL_FACTORY = {
