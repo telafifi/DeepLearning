@@ -1,0 +1,6 @@
+fire>=0.7.0
+lightning>=2.5.0
+torch>=2.4.1
+numpy>=2.2.1
+Pillow>=11.1.0
+tqdm>=4.66.0
