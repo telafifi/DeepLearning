@@ -1,3 +1,6 @@
+# 4-bit quantized linear layers - use the provided block_quantize_4bit / block_dequantize_4bit
+# The pre-hook quantizes full weights when loading from checkpoint; forward dequantizes on the fly
+
 from pathlib import Path
 
 import torch
@@ -72,38 +75,57 @@ class Linear4Bit(torch.nn.Module):
         self, state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs
     ):
         if f"{prefix}weight" in state_dict:
-            # Load the original weights and remove them from the state_dict (mark them as loaded)
-            weight = state_dict[f"{prefix}weight"]  # noqa: F841
+            weight = state_dict[f"{prefix}weight"]
             del state_dict[f"{prefix}weight"]
-            # TODO: Quantize the weights and store them in self.weight_q4 and self.weight_norm
-            raise NotImplementedError()
+            # Quantize: flatten to 1D (block_quantize expects 1D), then copy into our buffers
+            weight_flat = weight.flatten()
+            x_quant_4, norm = block_quantize_4bit(weight_flat, self._group_size)
+            self.weight_q4.copy_(x_quant_4.to(self.weight_q4.dtype))
+            self.weight_norm.copy_(norm.to(self.weight_norm.dtype))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         with torch.no_grad():
-            # TODO: Dequantize and call the layer
-            # Hint: You can use torch.nn.functional.linear
-            raise NotImplementedError()
+            # Dequantize 4-bit weights back to float32 for the matmul
+            weight_flat = block_dequantize_4bit(self.weight_q4, self.weight_norm)
+            weight = weight_flat.view(self._shape)
+            return torch.nn.functional.linear(x, weight, self.bias)
 
 
 class BigNet4Bit(torch.nn.Module):
     """
-    A BigNet where all weights are in 4bit precision. Use the Linear4Bit module for this.
-    It is fine to keep all computation in float32.
+    BigNet with 4-bit quantized linear layers. Same architecture as BigNet but
+    Linear -> Linear4Bit. Computation stays in float32 for stability.
     """
 
     class Block(torch.nn.Module):
         def __init__(self, channels):
             super().__init__()
-            # TODO: Implement me (feel free to copy and reuse code from bignet.py)
-            raise NotImplementedError()
+            self.model = torch.nn.Sequential(
+                Linear4Bit(channels, channels),
+                torch.nn.ReLU(),
+                Linear4Bit(channels, channels),
+                torch.nn.ReLU(),
+                Linear4Bit(channels, channels),
+            )
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             return self.model(x) + x
 
     def __init__(self):
         super().__init__()
-        # TODO: Implement me (feel free to copy and reuse code from bignet.py)
-        raise NotImplementedError()
+        self.model = torch.nn.Sequential(
+            self.Block(BIGNET_DIM),
+            LayerNorm(BIGNET_DIM),
+            self.Block(BIGNET_DIM),
+            LayerNorm(BIGNET_DIM),
+            self.Block(BIGNET_DIM),
+            LayerNorm(BIGNET_DIM),
+            self.Block(BIGNET_DIM),
+            LayerNorm(BIGNET_DIM),
+            self.Block(BIGNET_DIM),
+            LayerNorm(BIGNET_DIM),
+            self.Block(BIGNET_DIM),
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
