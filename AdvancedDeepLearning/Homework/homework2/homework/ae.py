@@ -51,7 +51,7 @@ class PatchifyLinear(torch.nn.Module):
 
         return: (B, H//patch_size, W//patch_size, latent_dim) a patchified embedding tensor
         """
-        return chw_to_hwc(self.patch_conv(hwc_to_chw(x)))
+        return chw_to_hwc(self.patch_conv(hwc_to_chw(x).contiguous()))
 
 
 class UnpatchifyLinear(torch.nn.Module):
@@ -73,7 +73,7 @@ class UnpatchifyLinear(torch.nn.Module):
 
         return: (B, H * patch_size, W * patch_size, 3) a image tensor
         """
-        return chw_to_hwc(self.unpatch_conv(hwc_to_chw(x)))
+        return chw_to_hwc(self.unpatch_conv(hwc_to_chw(x).contiguous()))
 
 
 class PatchAutoEncoderBase(abc.ABC):
@@ -120,7 +120,7 @@ class PatchAutoEncoder(torch.nn.Module, PatchAutoEncoderBase):
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
             x = self.patchify(x)  # (B, h, w, latent_dim)
-            x = hwc_to_chw(x)
+            x = hwc_to_chw(x).contiguous()
             x = torch.nn.functional.gelu(self.conv1(x))
             x = self.conv2(x)
             return chw_to_hwc(x)  # (B, h, w, bottleneck)
@@ -133,10 +133,10 @@ class PatchAutoEncoder(torch.nn.Module, PatchAutoEncoderBase):
             self.unpatchify = UnpatchifyLinear(patch_size, latent_dim)
 
         def forward(self, x: torch.Tensor) -> torch.Tensor:
-            x = hwc_to_chw(x)
+            x = hwc_to_chw(x).contiguous()
             x = torch.nn.functional.gelu(self.conv1(x))
             x = self.conv2(x)
-            x = chw_to_hwc(x)
+            x = chw_to_hwc(x).contiguous()
             return self.unpatchify(x)
 
     def __init__(self, patch_size: int = 25, latent_dim: int = 128, bottleneck: int = 128):
@@ -151,6 +151,7 @@ class PatchAutoEncoder(torch.nn.Module, PatchAutoEncoderBase):
         minimize (or even just visualize).
         You can return an empty dictionary if you don't have any additional terms.
         """
+        x = x.contiguous()
         z = self.encode(x)
         x_hat = self.decode(z)
         return x_hat, {}

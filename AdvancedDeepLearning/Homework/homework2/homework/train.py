@@ -138,7 +138,11 @@ def train(model_name_or_path: str, epochs: int = 5, batch_size: int = 64):
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     logger = TensorBoardLogger("logs", name=f"{timestamp}_{model_name}")
-    trainer = L.Trainer(max_epochs=epochs, logger=logger, callbacks=[CheckPointer()])
+    # MPS can hit "view size is not compatible with stride" in backward; use CPU for stability
+    accelerator = "cpu" if not torch.cuda.is_available() else "auto"
+    trainer = L.Trainer(
+        max_epochs=epochs, logger=logger, callbacks=[CheckPointer()], accelerator=accelerator
+    )
     trainer.fit(
         model=l_model,
     )
