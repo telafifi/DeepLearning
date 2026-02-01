@@ -18,7 +18,9 @@ def generation(tokenizer: Path, autoregressive: Path, n_images: int, output: Pat
     output: Path to save the images
     """
     output = Path(output)
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    )
     tk_model = cast(Tokenizer, torch.load(tokenizer, weights_only=False).to(device))
     ar_model = cast(Autoregressive, torch.load(autoregressive, weights_only=False).to(device))
 

@@ -41,7 +41,9 @@ def compress(tokenizer: Path, autoregressive: Path, image: Path, compressed_imag
     compressed_image: Path to save the compressed image tensor.
     """
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    )
     tk_model = cast(Tokenizer, torch.load(tokenizer, weights_only=False).to(device))
     ar_model = cast(Autoregressive, torch.load(autoregressive, weights_only=False).to(device))
     cmp = Compressor(tk_model, ar_model)
@@ -62,7 +64,9 @@ def decompress(tokenizer: Path, autoregressive: Path, compressed_image: Path, im
     images: Path to save the image to compress.
     """
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
+    )
     tk_model = cast(Tokenizer, torch.load(tokenizer, weights_only=False).to(device))
     ar_model = cast(Autoregressive, torch.load(autoregressive, weights_only=False).to(device))
     cmp = Compressor(tk_model, ar_model)
