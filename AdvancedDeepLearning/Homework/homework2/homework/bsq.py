@@ -46,7 +46,9 @@ class Tokenizer(abc.ABC):
 class BSQ(torch.nn.Module):
     def __init__(self, codebook_bits: int, embedding_dim: int):
         super().__init__()
-        raise NotImplementedError()
+        self._codebook_bits = codebook_bits
+        self.proj_down = torch.nn.Linear(embedding_dim, codebook_bits)
+        self.proj_up = torch.nn.Linear(codebook_bits, embedding_dim)
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -55,14 +57,16 @@ class BSQ(torch.nn.Module):
         - L2 normalization
         - differentiable sign
         """
-        raise NotImplementedError()
+        x = self.proj_down(x)
+        x = torch.nn.functional.normalize(x, p=2, dim=-1)
+        return diff_sign(x)
 
     def decode(self, x: torch.Tensor) -> torch.Tensor:
         """
         Implement the BSQ decoder:
         - A linear up-projection into embedding_dim should suffice
         """
-        raise NotImplementedError()
+        return self.proj_up(x)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.decode(self.encode(x))
@@ -80,11 +84,16 @@ class BSQ(torch.nn.Module):
         return self.decode(self._index_to_code(x))
 
     def _code_to_index(self, x: torch.Tensor) -> torch.Tensor:
-        x = (x >= 0).int()
-        return (x * 2 ** torch.arange(x.size(-1)).to(x.device)).sum(dim=-1)
+        # Use * (2 ** ...) instead of << for Apple Silicon (MPS) compatibility
+        binary = (x >= 0).int()
+        powers = 2 ** torch.arange(x.size(-1), device=x.device, dtype=x.dtype)
+        return (binary * powers).sum(dim=-1).long()
 
     def _index_to_code(self, x: torch.Tensor) -> torch.Tensor:
-        return 2 * ((x[..., None] & (2 ** torch.arange(self._codebook_bits).to(x.device))) > 0).float() - 1
+        # Avoid bitwise & for Apple Silicon: use (x // 2**k) % 2 for each bit
+        powers = 2 ** torch.arange(self._codebook_bits, device=x.device, dtype=torch.long)
+        bits = ((x[..., None].long() // powers) % 2).float()
+        return 2 * bits - 1
 
 
 class BSQPatchAutoEncoder(PatchAutoEncoder, Tokenizer):
@@ -96,35 +105,37 @@ class BSQPatchAutoEncoder(PatchAutoEncoder, Tokenizer):
     """
 
     def __init__(self, patch_size: int = 5, latent_dim: int = 128, codebook_bits: int = 10):
-        super().__init__(patch_size=patch_size, latent_dim=latent_dim)
-        raise NotImplementedError()
+        super().__init__(patch_size=patch_size, latent_dim=latent_dim, bottleneck=latent_dim)
+        self.codebook_bits = codebook_bits
+        self.bsq = BSQ(codebook_bits=codebook_bits, embedding_dim=latent_dim)
 
     def encode_index(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError()
+        if x.dim() == 3:
+            x = x.unsqueeze(0)
+        z = self.encoder(x)
+        return self.bsq.encode_index(z)
 
     def decode_index(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError()
+        z = self.bsq.decode_index(x)
+        return self.decoder(z)
 
     def encode(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError()
+        z = self.encoder(x)
+        return self.bsq(z)  # quantize then dequantize
 
     def decode(self, x: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError()
+        return self.decoder(x)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        """
-        Return the reconstructed image and a dictionary of additional loss terms you would like to
-        minimize (or even just visualize).
-        Hint: It can be helpful to monitor the codebook usage with
-
-              cnt = torch.bincount(self.encode_index(x).flatten(), minlength=2**self.codebook_bits)
-
-              and returning
-
-              {
-                "cb0": (cnt == 0).float().mean().detach(),
-                "cb2": (cnt <= 2).float().mean().detach(),
-                ...
-              }
-        """
-        raise NotImplementedError()
+        z = self.encoder(x)
+        z_q = self.bsq(z)
+        x_hat = self.decoder(z_q)
+        cnt = torch.bincount(
+            self.bsq.encode_index(z).flatten(),
+            minlength=2**self.codebook_bits,
+        )
+        extra = {
+            "cb0": (cnt == 0).float().mean().detach(),
+            "cb2": (cnt <= 2).float().mean().detach(),
+        }
+        return x_hat, extra
