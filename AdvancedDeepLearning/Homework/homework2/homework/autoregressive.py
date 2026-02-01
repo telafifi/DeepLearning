@@ -71,7 +71,9 @@ class AutoregressiveModel(torch.nn.Module, Autoregressive):
         self.head = torch.nn.Linear(d_latent, n_tokens)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        # x: (B, h, w) integer tokens
+        # x: (B, h, w) integer tokens; tokenized data may be (B, 1, h, w)
+        if x.dim() == 4:
+            x = x.squeeze(1)
         B, h, w = x.shape
         L = h * w
         # Flatten to (B, L)
@@ -91,7 +93,7 @@ class AutoregressiveModel(torch.nn.Module, Autoregressive):
         out = out[:-1]  # (L, B, d_latent)
         out = out.permute(1, 0, 2)  # (B, L, d_latent)
         logits = self.head(out)  # (B, L, n_tokens)
-        logits = logits.reshape(B, h, w, self.n_tokens)
+        logits = logits.reshape(B, h, w, self.n_tokens).contiguous()
         return logits, {}
 
     def generate(self, B: int = 1, h: int = 30, w: int = 20, device=None) -> torch.Tensor:  # noqa
@@ -99,7 +101,7 @@ class AutoregressiveModel(torch.nn.Module, Autoregressive):
             device = next(self.parameters()).device
         L = h * w
         tokens = torch.zeros(B, 1, dtype=torch.long, device=device)  # start token
-        for t in range(L - 1):
+        for t in range(L):  # generate L tokens (one per position)
             # Build input grid: first t+1 positions filled, rest zeros
             x_grid = torch.zeros(B, h, w, dtype=torch.long, device=device)
             for i in range(t + 1):
@@ -115,4 +117,4 @@ class AutoregressiveModel(torch.nn.Module, Autoregressive):
             tokens = torch.cat([tokens, next_token.unsqueeze(1)], dim=1)
         # tokens is (B, L+1) with start + L tokens; drop start
         tokens = tokens[:, 1:]  # (B, L)
-        return tokens.reshape(B, h, w)
+        return tokens.reshape(B, h, w).contiguous()
