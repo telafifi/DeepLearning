@@ -53,12 +53,66 @@ class AutoregressiveModel(torch.nn.Module, Autoregressive):
     Hint: You can complete this homework without using positional embeddings
     """
 
-    def __init__(self, d_latent: int = 128, n_tokens: int = 2**10):
+    def __init__(self, d_latent: int = 128, n_tokens: int = 2**10, n_layers: int = 4):
         super().__init__()
-        raise NotImplementedError()
+        self.n_tokens = n_tokens
+        self.d_latent = d_latent
+        self.embed = torch.nn.Embedding(n_tokens, d_latent)
+        encoder_layer = torch.nn.TransformerEncoderLayer(
+            d_model=d_latent,
+            nhead=4,
+            dim_feedforward=d_latent * 4,
+            dropout=0.1,
+            activation="gelu",
+            batch_first=False,
+            norm_first=False,
+        )
+        self.transformer = torch.nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+        self.head = torch.nn.Linear(d_latent, n_tokens)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-        raise NotImplementedError()
+        # x: (B, h, w) integer tokens
+        B, h, w = x.shape
+        L = h * w
+        # Flatten to (B, L)
+        x_flat = x.reshape(B, L)
+        # Prepend start token (0): (B, L+1)
+        start = torch.zeros(B, 1, dtype=torch.long, device=x.device)
+        x_shifted = torch.cat([start, x_flat], dim=1)  # (B, L+1)
+        # Embed: (B, L+1, d_latent)
+        emb = self.embed(x_shifted)
+        # Transformer expects (seq_len, batch, d_model)
+        emb = emb.permute(1, 0, 2)  # (L+1, B, d_latent)
+        causal_mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            emb.size(0), device=x.device
+        )
+        out = self.transformer(emb, mask=causal_mask)  # (L+1, B, d_latent)
+        # Take positions 0..L-1 to predict positions 1..L (i.e. x)
+        out = out[:-1]  # (L, B, d_latent)
+        out = out.permute(1, 0, 2)  # (B, L, d_latent)
+        logits = self.head(out)  # (B, L, n_tokens)
+        logits = logits.reshape(B, h, w, self.n_tokens)
+        return logits, {}
 
     def generate(self, B: int = 1, h: int = 30, w: int = 20, device=None) -> torch.Tensor:  # noqa
-        raise NotImplementedError()
+        if device is None:
+            device = next(self.parameters()).device
+        L = h * w
+        tokens = torch.zeros(B, 1, dtype=torch.long, device=device)  # start token
+        for t in range(L - 1):
+            # Build input grid: first t+1 positions filled, rest zeros
+            x_grid = torch.zeros(B, h, w, dtype=torch.long, device=device)
+            for i in range(t + 1):
+                r, c = i // w, i % w
+                x_grid[:, r, c] = tokens[:, i]
+            logits, _ = self.forward(x_grid)
+            # Logits at position t predict next token (position t in our 0-indexed content)
+            r, c = t // w, t % w
+            next_logits = logits[:, r, c, :]  # (B, n_tokens)
+            next_token = torch.multinomial(
+                torch.softmax(next_logits, dim=-1), num_samples=1
+            ).squeeze(-1)  # (B,)
+            tokens = torch.cat([tokens, next_token.unsqueeze(1)], dim=1)
+        # tokens is (B, L+1) with start + L tokens; drop start
+        tokens = tokens[:, 1:]  # (B, L)
+        return tokens.reshape(B, h, w)
